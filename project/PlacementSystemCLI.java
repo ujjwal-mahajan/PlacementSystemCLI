@@ -1,1 +1,383 @@
+import java.util.*;
+import java.util.stream.Collectors;
 
+// Custom Exception for Placement Operations
+class PlacementException extends Exception {
+    public PlacementException(String message) {
+        super(message);
+    }
+}
+
+// Student Entity
+class Student {
+    private final String id;
+    private final String name;
+    private final String department;
+    private final double cgpa;
+    private final int activeBacklogs;
+    private final Set<String> skills;
+    private boolean isPlaced;
+
+    public Student(String id, String name, String department, double cgpa, int activeBacklogs, Set<String> skills) {
+        this.id = id;
+        this.name = name;
+        this.department = department;
+        this.cgpa = cgpa;
+        this.activeBacklogs = activeBacklogs;
+        this.skills = new HashSet<>(skills);
+        this.isPlaced = false;
+    }
+
+    public String getId() { return id; }
+    public String getName() { return name; }
+    public String getDepartment() { return department; }
+    public double getCgpa() { return cgpa; }
+    public int getActiveBacklogs() { return activeBacklogs; }
+    public Set<String> getSkills() { return Collections.unmodifiableSet(skills); }
+    public boolean isPlaced() { return isPlaced; }
+    public void setPlaced(boolean placed) { isPlaced = placed; }
+
+    @Override
+    public String toString() {
+        return String.format("[%s] %s | Dept: %s | CGPA: %.2f | Backlogs: %d | Placed: %s | Skills: %s",
+                id, name, department, cgpa, activeBacklogs, isPlaced ? "Yes" : "No", skills);
+    }
+}
+
+// Criteria Entity built using Builder Pattern
+class PlacementCriteria {
+    private final double minCgpa;
+    private final int maxAllowedBacklogs;
+    private final Set<String> requiredSkills;
+    private final Set<String> eligibleDepartments;
+
+    private PlacementCriteria(Builder builder) {
+        this.minCgpa = builder.minCgpa;
+        this.maxAllowedBacklogs = builder.maxAllowedBacklogs;
+        this.requiredSkills = builder.requiredSkills;
+        this.eligibleDepartments = builder.eligibleDepartments;
+    }
+
+    public double getMinCgpa() { return minCgpa; }
+    public int getMaxAllowedBacklogs() { return maxAllowedBacklogs; }
+    public Set<String> getRequiredSkills() { return requiredSkills; }
+    public Set<String> getEligibleDepartments() { return eligibleDepartments; }
+
+    public static class Builder {
+        private double minCgpa = 0.0;
+        private int maxAllowedBacklogs = 0;
+        private Set<String> requiredSkills = new HashSet<>();
+        private Set<String> eligibleDepartments = new HashSet<>();
+
+        public Builder setMinCgpa(double minCgpa) {
+            this.minCgpa = minCgpa;
+            return this;
+        }
+
+        public Builder setMaxAllowedBacklogs(int maxAllowedBacklogs) {
+            this.maxAllowedBacklogs = maxAllowedBacklogs;
+            return this;
+        }
+
+        public Builder addRequiredSkill(String skill) {
+            if (!skill.trim().isEmpty()) {
+                this.requiredSkills.add(skill.trim().toLowerCase());
+            }
+            return this;
+        }
+
+        public Builder addEligibleDepartment(String department) {
+            if (!department.trim().isEmpty()) {
+                this.eligibleDepartments.add(department.trim().toUpperCase());
+            }
+            return this;
+        }
+
+        public PlacementCriteria build() {
+            return new PlacementCriteria(this);
+        }
+    }
+}
+
+// Company Entity
+class Company {
+    private final String companyId;
+    private final String name;
+    private final double packageOfferedLpa;
+    private final PlacementCriteria criteria;
+
+    public Company(String companyId, String name, double packageOfferedLpa, PlacementCriteria criteria) {
+        this.companyId = companyId;
+        this.name = name;
+        this.packageOfferedLpa = packageOfferedLpa;
+        this.criteria = criteria;
+    }
+
+    public String getCompanyId() { return companyId; }
+    public String getName() { return name; }
+    public double getPackageOfferedLpa() { return packageOfferedLpa; }
+    public PlacementCriteria getCriteria() { return criteria; }
+}
+
+// Strategy Pattern for Eligibility Verification
+interface EligibilityStrategy {
+    boolean isEligible(Student student, PlacementCriteria criteria);
+}
+
+class StandardEligibilityStrategy implements EligibilityStrategy {
+    @Override
+    public boolean isEligible(Student student, PlacementCriteria criteria) {
+        if (student.isPlaced()) return false;
+        if (student.getCgpa() < criteria.getMinCgpa()) return false;
+        if (student.getActiveBacklogs() > criteria.getMaxAllowedBacklogs()) return false;
+        
+        if (!criteria.getEligibleDepartments().isEmpty() && 
+            !criteria.getEligibleDepartments().contains(student.getDepartment().toUpperCase())) {
+            return false;
+        }
+
+        Set<String> studentSkills = student.getSkills().stream()
+                .map(String::toLowerCase)
+                .collect(Collectors.toSet());
+
+        return studentSkills.containsAll(criteria.getRequiredSkills());
+    }
+}
+
+// Core Management Service
+class PlacementManagementService {
+    private final Map<String, Student> studentRegistry = new HashMap<>();
+    private final Map<String, Company> companyRegistry = new HashMap<>();
+    private final EligibilityStrategy eligibilityStrategy;
+
+    public PlacementManagementService(EligibilityStrategy eligibilityStrategy) {
+        this.eligibilityStrategy = eligibilityStrategy;
+    }
+
+    public void registerStudent(Student student) throws PlacementException {
+        if (studentRegistry.containsKey(student.getId())) {
+            throw new PlacementException("Student with ID " + student.getId() + " is already registered.");
+        }
+        studentRegistry.put(student.getId(), student);
+    }
+
+    public void registerCompany(Company company) throws PlacementException {
+        if (companyRegistry.containsKey(company.getCompanyId())) {
+            throw new PlacementException("Company with ID " + company.getCompanyId() + " is already registered.");
+        }
+        companyRegistry.put(company.getCompanyId(), company);
+    }
+
+    public List<Student> getEligibleStudentsForCompany(String companyId) throws PlacementException {
+        Company company = companyRegistry.get(companyId);
+        if (company == null) {
+            throw new PlacementException("Company not found with ID: " + companyId);
+        }
+        return studentRegistry.values().stream()
+                .filter(student -> eligibilityStrategy.isEligible(student, company.getCriteria()))
+                .collect(Collectors.toList());
+    }
+
+    public void markStudentAsPlaced(String studentId, String companyId) throws PlacementException {
+        Student student = studentRegistry.get(studentId);
+        Company company = companyRegistry.get(companyId);
+
+        if (student == null) throw new PlacementException("Student ID not found: " + studentId);
+        if (company == null) throw new PlacementException("Company ID not found: " + companyId);
+        if (student.isPlaced()) throw new PlacementException("Student " + student.getName() + " is already placed.");
+
+        student.setPlaced(true);
+        System.out.println("\nSUCCESS: " + student.getName() + " has been marked as placed at " + company.getName() + "!");
+    }
+
+    public Map<String, Student> getStudentRegistry() { return studentRegistry; }
+    public Map<String, Company> getCompanyRegistry() { return companyRegistry; }
+}
+
+// Interactive CLI Runner Class
+public class PlacementSystemCLI {
+    private static final PlacementManagementService service = new PlacementManagementService(new StandardEligibilityStrategy());
+    private static final Scanner scanner = new Scanner(System.in);
+
+    public static void main(String[] args) {
+        boolean running = true;
+        while (running) {
+            printHeader("PLACEMENT MANAGEMENT SYSTEM");
+            System.out.println("1. Register Student");
+            System.out.println("2. Register Company & Criteria");
+            System.out.println("3. Check Eligible Candidates for a Company");
+            System.out.println("4. Mark Student as Placed");
+            System.out.println("5. View All Registered Students");
+            System.out.println("6. View Placement Statistics");
+            System.out.println("7. Exit");
+            System.out.print("Select an option (1-7): ");
+
+            try {
+                int choice = Integer.parseInt(scanner.nextLine().trim());
+                switch (choice) {
+                    case 1 -> handleStudentRegistration();
+                    case 2 -> handleCompanyRegistration();
+                    case 3 -> handleCheckEligibility();
+                    case 4 -> handleMarkPlaced();
+                    case 5 -> displayAllStudents();
+                    case 6 -> displayStatistics();
+                    case 7 -> {
+                        running = false;
+                        System.out.println("\nExiting system. Goodbye!");
+                    }
+                    default -> System.out.println("Invalid option. Please choose a number between 1 and 7.");
+                }
+            } catch (NumberFormatException e) {
+                System.out.println("Error: Please enter a valid numerical menu choice.");
+            } catch (Exception e) {
+                System.out.println("Error: " + e.getMessage());
+            }
+        }
+    }
+
+    private static void handleStudentRegistration() {
+        printHeader("REGISTER NEW STUDENT");
+        try {
+            System.out.print("Enter Student ID: ");
+            String id = scanner.nextLine().trim();
+
+            System.out.print("Enter Student Name: ");
+            String name = scanner.nextLine().trim();
+
+            System.out.print("Enter Department (e.g., CSE, ECE, IT): ");
+            String dept = scanner.nextLine().trim();
+
+            System.out.print("Enter CGPA (e.g., 8.5): ");
+            double cgpa = Double.parseDouble(scanner.nextLine().trim());
+
+            System.out.print("Enter Active Backlogs Count: ");
+            int backlogs = Integer.parseInt(scanner.nextLine().trim());
+
+            System.out.print("Enter Skills (comma-separated, e.g., Java, SQL, Python): ");
+            String skillsInput = scanner.nextLine().trim();
+            Set<String> skills = Arrays.stream(skillsInput.split(","))
+                    .map(String::trim)
+                    .filter(s -> !s.isEmpty())
+                    .collect(Collectors.toSet());
+
+            Student student = new Student(id, name, dept, cgpa, backlogs, skills);
+            service.registerStudent(student);
+            System.out.println("\nSUCCESS: Student registered successfully.");
+        } catch (NumberFormatException e) {
+            System.out.println("Registration failed: Invalid numeric input for CGPA or Backlogs.");
+        } catch (PlacementException e) {
+            System.out.println("Registration failed: " + e.getMessage());
+        }
+    }
+
+    private static void handleCompanyRegistration() {
+        printHeader("REGISTER COMPANY & PLACEMENT CRITERIA");
+        try {
+            System.out.print("Enter Company ID: ");
+            String id = scanner.nextLine().trim();
+
+            System.out.print("Enter Company Name: ");
+            String name = scanner.nextLine().trim();
+
+            System.out.print("Enter Package Offered (in LPA): ");
+            double packageLpa = Double.parseDouble(scanner.nextLine().trim());
+
+            System.out.print("Enter Minimum Required CGPA: ");
+            double minCgpa = Double.parseDouble(scanner.nextLine().trim());
+
+            System.out.print("Enter Maximum Allowed Backlogs: ");
+            int maxBacklogs = Integer.parseInt(scanner.nextLine().trim());
+
+            System.out.print("Enter Eligible Departments (comma-separated, press enter for ALL): ");
+            String deptsInput = scanner.nextLine().trim();
+
+            System.out.print("Enter Required Skills (comma-separated, press enter for NONE): ");
+            String skillsInput = scanner.nextLine().trim();
+
+            PlacementCriteria.Builder builder = new PlacementCriteria.Builder()
+                    .setMinCgpa(minCgpa)
+                    .setMaxAllowedBacklogs(maxBacklogs);
+
+            if (!deptsInput.isEmpty()) {
+                Arrays.stream(deptsInput.split(",")).forEach(builder::addEligibleDepartment);
+            }
+            if (!skillsInput.isEmpty()) {
+                Arrays.stream(skillsInput.split(",")).forEach(builder::addRequiredSkill);
+            }
+
+            Company company = new Company(id, name, packageLpa, builder.build());
+            service.registerCompany(company);
+            System.out.println("\nSUCCESS: Company and drive criteria registered successfully.");
+        } catch (NumberFormatException e) {
+            System.out.println("Registration failed: Invalid numeric input for Package, CGPA, or Backlogs.");
+        } catch (PlacementException e) {
+            System.out.println("Registration failed: " + e.getMessage());
+        }
+    }
+
+    private static void handleCheckEligibility() {
+        printHeader("EVALUATE ELIGIBLE STUDENTS");
+        System.out.print("Enter Company ID to run drive evaluation: ");
+        String companyId = scanner.nextLine().trim();
+
+        try {
+            List<Student> eligibleStudents = service.getEligibleStudentsForCompany(companyId);
+            Company company = service.getCompanyRegistry().get(companyId);
+
+            System.out.println("\nEligible candidates for " + company.getName() + " (" + company.getPackageOfferedLpa() + " LPA):");
+            if (eligibleStudents.isEmpty()) {
+                System.out.println("-> No students currently match the criteria.");
+            } else {
+                for (Student s : eligibleStudents) {
+                    System.out.println(" -> " + s);
+                }
+            }
+        } catch (PlacementException e) {
+            System.out.println("Evaluation error: " + e.getMessage());
+        }
+    }
+
+    private static void handleMarkPlaced() {
+        printHeader("RECORD STUDENT PLACEMENT");
+        System.out.print("Enter Student ID: ");
+        String studentId = scanner.nextLine().trim();
+
+        System.out.print("Enter Company ID: ");
+        String companyId = scanner.nextLine().trim();
+
+        try {
+            service.markStudentAsPlaced(studentId, companyId);
+        } catch (PlacementException e) {
+            System.out.println("Placement update failed: " + e.getMessage());
+        }
+    }
+
+    private static void displayAllStudents() {
+        printHeader("ALL REGISTERED STUDENTS");
+        Map<String, Student> registry = service.getStudentRegistry();
+        if (registry.isEmpty()) {
+            System.out.println("No students registered yet.");
+        } else {
+            registry.values().forEach(System.out::println);
+        }
+    }
+
+    private static void displayStatistics() {
+        printHeader("PLACEMENT STATISTICS");
+        Map<String, Student> registry = service.getStudentRegistry();
+        long total = registry.size();
+        long placed = registry.values().stream().filter(Student::isPlaced).count();
+        double pct = total == 0 ? 0.0 : ((double) placed / total) * 100;
+
+        System.out.println("Total Students Registered : " + total);
+        System.out.println("Total Students Placed     : " + placed);
+        System.out.println("Unplaced Students         : " + (total - placed));
+        System.out.println("Overall Placement Rate    : " + String.format("%.2f", pct) + "%");
+    }
+
+    private static void printHeader(String title) {
+        System.out.println("\n--------------------------------------------------");
+        System.out.println(" " + title);
+        System.out.println("--------------------------------------------------");
+    }
+}
